@@ -16,8 +16,15 @@ Source: https://github.com/markziemann/histone_acetyl_rnaseq
 
 # Introduction
 
-The samples are labelled as CON (control) and KO for knockout, ut are the untreated samples and 
-dNs are the treated samples (mito biogenesis stimulator).
+In this study we are looking at the effect of knock-down of two genes which are required
+for the supply of acetyl units.
+It is hypothesised that knock-down of these genes could lead to problems with
+the response to exercise.
+We have both ctrl and kd under either sedentary or exercise conditions.
+
+The focus of this report is to look at the overall structure of the dataset,
+understand whether the knock-down was successful and identify any outliers.
+
 
 ```{r,packages}
 
@@ -158,7 +165,7 @@ xx_atp <- xx[,which(colnames(xx) %in% rownames(ss_atp))]
 rpm_atp <- xx_atp/colSums(xx_atp)*1000000
 
 acly <- unlist(rpm_atp[grep("Acly",rownames(rpm_atp)),,drop=TRUE])
-names(acly) <- paste(ss_atp$construct,names(acly))
+names(acly) <- paste(names(acly), ss_atp$construct)
 
 barplot(acly,horiz=TRUE,las=1,main="Acly expression",xlab="reads per million")
 
@@ -169,6 +176,10 @@ boxplot(mylist,col="white",ylab="reads per million",main="Acly expression")
 beeswarm(mylist,pch=19,add=TRUE)
 myp <- signif(t.test(kd,ctrl)$p.value,3)
 mtext(paste("p=",myp))
+
+ratio <- kd/ctrl
+ratio <- ratio[order(ratio)]
+barplot(ratio,horiz=TRUE,las=1,xlab="relative quantification (kd/ctrl)",main="ATP-CL")
 
 # shapes for exercise or sedentary
 shapes <- as.numeric(factor(ss_atp$ex_sed))+14
@@ -266,7 +277,7 @@ xx_acs <- xx[,which(colnames(xx) %in% rownames(ss_acs))]
 rpm_acs <- xx_acs/colSums(xx_acs)*1000000
 
 acss <- unlist(rpm_acs[grep("Acss2$",rownames(rpm_acs)),,drop=TRUE])
-names(acss) <- paste(ss_acs$construct,names(acss))
+names(acss) <- paste(names(acss) , ss_acs$construct)
 
 barplot(acss,horiz=TRUE,las=1,main="Acss2 expression",xlab="reads per million")
 
@@ -277,6 +288,10 @@ boxplot(mylist,col="white",ylab="reads per million",main="Acss2 expression")
 beeswarm(mylist,pch=19,add=TRUE)
 myp <- signif(t.test(kd,ctrl)$p.value,3)
 mtext(paste("p=",myp))
+
+ratio <- kd/ctrl
+ratio <- ratio[order(ratio)]
+barplot(ratio,horiz=TRUE,las=1,xlab="relative quantification (kd/ctrl)",main="Acss2")
 
 # shapes for exercise or sedentary
 shapes <- as.numeric(factor(ss_acs$ex_sed))+14
@@ -476,7 +491,7 @@ dge[1:20,1:6] %>%
 dge3 <- dge
 d3up <- rownames(subset(dge3,padj <= 0.05 & log2FoldChange > 0))
 d3dn <- rownames(subset(dge3,padj <= 0.05 & log2FoldChange < 0))
-write.table(dge1,file="dge3.tsv",quote=FALSE,sep="\t")
+write.table(dge3,file="dge3.tsv",quote=FALSE,sep="\t")
 
 ```
 
@@ -505,11 +520,37 @@ dge[1:20,1:6] %>%
 dge4 <- dge
 d4up <- rownames(subset(dge4,padj <= 0.05 & log2FoldChange > 0))
 d4dn <- rownames(subset(dge4,padj <= 0.05 & log2FoldChange < 0))
-write.table(dge1,file="dge4.tsv",quote=FALSE,sep="\t")
+write.table(dge4,file="dge4.tsv",quote=FALSE,sep="\t")
 
 ```
 
-### Session information
+## Conclusion
+
+Some observations:
+
+* Read counts were a bit low which translated to a smaller number of genes detected.
+Typically this is in the range of ~15000 but we detected ~9500 in the 4 contrasts considered here.
+This may impact the number of genes that are detected as differentially expressed.
+
+* Acly (which encodes ATP-CL) was not measured at a sufficiently high level, and 
+did not exhibit a decrease in KD mice.
+
+* Acly knock-down did not result in any major gene expression changes in Sed or Ex mice.
+
+* Acss2 was detected at a relatively low level, and it did exhibit a decrease in kd samples.
+
+* Animal 6 might be an outlier in the Acss2 study (5176172).
+
+* DESeq2 identified Acss2 as significantly downregulated in the ks mice but there were no
+other significant differences.
+
+* In the list of top significant genes for Acss2 kd in Ex mice, there are some mitochondrial and
+metabolism genes.
+These are likely themes for pathway analysis.
+
+* The 
+
+## Session information
 
 ```{r,session}
 
