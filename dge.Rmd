@@ -548,7 +548,10 @@ other significant differences.
 metabolism genes.
 These are likely themes for pathway analysis.
 
-* The 
+* As the success of the knockdown was not consistent, we may need to omit animals or take a 
+different approach to the expression analysis.
+For example by contructing the expression analysis by looking for genes that correlate with Acly and 
+Acss2 instead of a case-control design.
 
 ## Session information
 
