@@ -85,7 +85,7 @@ ll <- do.call(cbind,l)
 colnames(ll) <- labels
 ll <- as.data.frame(ll[,order(colnames(ll))])
 write.table(ll,file="counts.tsv",sep="\t",quote=FALSE)
-rpm <- ll/colSums(ll) *1e6
+rpm <- apply(ll,2, function(x) { x / sum(x) * 1000000 } )
 write.table(rpm,file="rpm.tsv",sep="\t",quote=FALSE)
 
 head(ll)
@@ -166,7 +166,7 @@ ctrl and kd groups.
 ss_atp <- ss[which(ss$target_gene=="ATP-CL"),]
 xx_atp <- xx[,which(colnames(xx) %in% rownames(ss_atp))]
 
-rpm_atp <- xx_atp/colSums(xx_atp)*1000000
+rpm_atp <- apply(xx_atp,2, function(x) { x / sum(x) * 1000000 } )
 
 acly <- unlist(rpm_atp[grep("Acly",rownames(rpm_atp)),,drop=TRUE])
 names(acly) <- paste(names(acly), ss_atp$construct)
@@ -278,7 +278,7 @@ ctrl and kd groups.
 ss_acs <- ss[which(ss$target_gene=="ACSS2"),]
 xx_acs <- xx[,which(colnames(xx) %in% rownames(ss_acs))]
 
-rpm_acs <- xx_acs/colSums(xx_acs)*1000000
+rpm_acs <- apply(xx_acs,2, function(x) { x / sum(x) * 1000000 } )
 
 acss <- unlist(rpm_acs[grep("Acss2$",rownames(rpm_acs)),,drop=TRUE])
 names(acss) <- paste(names(acss) , ss_acs$construct)
