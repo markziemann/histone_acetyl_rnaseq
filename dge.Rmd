@@ -559,6 +559,35 @@ write.table(dge3,file="dge3.tsv",quote=FALSE,sep="\t")
 
 ```
 
+Now paired.
+
+```{r,de03p}
+
+dim(xx_acs_sed)
+xx_acs_sed <- xx_acs_sed[which(rowMeans(xx_acs_sed)>=10),]
+dim(xx_acs_sed)
+
+ss_acs_sed$construct <- factor(ss_acs_sed$construct,levels=c("ctrl","kd"))
+
+dds <- DESeqDataSetFromMatrix(countData = xx_acs_sed , colData = ss_acs_sed,
+  design = ~ animal_id + construct )
+res <- DESeq(dds)
+z<- results(res)
+vsd <- vst(dds, blind=FALSE)
+zz <- cbind(as.data.frame(z),assay(vsd))
+dge <- as.data.frame(zz[order(zz$pvalue),])
+
+dge[1:20,1:6] %>%
+  kbl(caption = "Top gene expression differences for contrast 1: Effect of ACSS2 KD in Sed mice") %>%
+  kable_paper("hover", full_width = F)
+
+dge3p <- dge
+d3pup <- rownames(subset(dge3p,padj <= 0.05 & log2FoldChange > 0))
+d3pdn <- rownames(subset(dge3p,padj <= 0.05 & log2FoldChange < 0))
+write.table(dge3p,file="dge3p.tsv",quote=FALSE,sep="\t")
+
+```
+
 ### DGE 4 Effect of ACSS2 KD in Ex animals
 
 ```{r,de04}
@@ -585,6 +614,35 @@ dge4 <- dge
 d4up <- rownames(subset(dge4,padj <= 0.05 & log2FoldChange > 0))
 d4dn <- rownames(subset(dge4,padj <= 0.05 & log2FoldChange < 0))
 write.table(dge4,file="dge4.tsv",quote=FALSE,sep="\t")
+
+```
+
+Now paired.
+
+```{r,de04p}
+
+dim(xx_acs_ex)
+xx_acs_ex <- xx_acs_ex[which(rowMeans(xx_acs_ex)>=10),]
+dim(xx_acs_ex)
+
+ss_acs_ex$construct <- factor(ss_acs_ex$construct,levels=c("ctrl","kd"))
+
+dds <- DESeqDataSetFromMatrix(countData = xx_acs_ex , colData = ss_acs_ex,
+  design = ~ animal_id + construct )
+res <- DESeq(dds)
+z<- results(res)
+vsd <- vst(dds, blind=FALSE)
+zz <- cbind(as.data.frame(z),assay(vsd))
+dge <- as.data.frame(zz[order(zz$pvalue),])
+
+dge[1:20,1:6] %>%
+  kbl(caption = "Top gene expression differences for contrast 1: Effect of ACSS2 KD in Ex mice") %>%
+  kable_paper("hover", full_width = F)
+
+dge4p <- dge
+d4pup <- rownames(subset(dge4p,padj <= 0.05 & log2FoldChange > 0))
+d4pdn <- rownames(subset(dge4p,padj <= 0.05 & log2FoldChange < 0))
+write.table(dge4p,file="dge4p.tsv",quote=FALSE,sep="\t")
 
 ```
 
