@@ -1,0 +1,1049 @@
+---
+title: "Histone Acetyl RNA-seq DGE"
+author: "Mark Ziemann"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    code_folding: hide
+    fig_width: 7
+    fig_height: 7
+theme: cosmo
+---
+
+Source: https://github.com/markziemann/histone_acetyl_rnaseq
+
+# Introduction
+
+In this study we are looking at the effect of knock-down of two genes which are required
+for the supply of acetyl units.
+It is hypothesised that knock-down of these genes could lead to problems with
+the response to exercise.
+We have both ctrl and kd under either sedentary or exercise conditions.
+
+The focus of this report is to look at the overall structure of the dataset,
+understand whether the knock-down was successful and identify any outliers.
+
+
+Mark's notes: the ctrl vs kd comparisons to be conducted as paired analysis.
+Need to include new contrasts for Sed vs Ex (unpaired).
+Using the unpaired analysis will reduce statistical power by a bit, but we'll see.
+
+```{r,packages}
+
+suppressPackageStartupMessages({
+    library("zoo")
+    library("tidyverse")
+    library("reshape2")
+    library("DESeq2")
+    library("gplots")
+    library("fgsea")
+    library("MASS")
+    library("mitch")
+    library("eulerr")
+    library("limma")
+    library("topconfects")
+    library("kableExtra")
+    library("vioplot")
+    library("beeswarm")
+})
+
+```
+
+## Import read counts
+
+Importing RNA-seq data
+
+```{r,importdata}
+
+tmp <- read.table("3col.tsv.gz",header=F)
+x <- as.matrix(acast(tmp, V2~V1, value.var="V3", fun.aggregate = sum))
+x <- as.data.frame(x)
+accession <- sapply((strsplit(rownames(x),"\\|")),"[[",2)
+symbol<-sapply((strsplit(rownames(x),"\\|")),"[[",6)
+x$geneid <- paste(accession,symbol)
+xx <- aggregate(. ~ geneid,x,sum)
+rownames(xx) <- xx$geneid
+xx$geneid = NULL
+xx <- round(xx)
+xx <- xx[,which(colnames(xx)!="test")]
+xx[1:6,1:6]
+dim(xx)
+
+```
+
+Fix the sample names.
+
+They are duplicated for lane 1 and 2, which I will aggregate.
+
+```{r,colnames}
+
+labels <- unique(sapply(strsplit(colnames(xx),"_"),"[[",1))
+l <- lapply(labels,function(x) { rowSums(xx[,grep(x,colnames(xx))]) } )
+ll <- do.call(cbind,l)
+colnames(ll) <- labels
+ll <- as.data.frame(ll[,order(colnames(ll))])
+write.table(ll,file="counts.tsv",sep="\t",quote=FALSE)
+rpm <- apply(ll,2, function(x) { x / sum(x) * 1000000 } )
+write.table(rpm,file="rpm.tsv",sep="\t",quote=FALSE)
+
+head(ll)
+dim(xx)
+dim(ll)
+
+xx <- ll
+
+```
+
+Make a sample sheet.
+
+```{r,samplesheet}
+
+ss <- read.table("samplesheet.tsv")
+
+# fix the capitalisation
+ss$ex_sed <- gsub("SED","Sed",ss$ex_sed)
+
+colnames(xx) == ss$Sample_ID
+
+rownames(ss) <- ss$Sample_ID
+
+ss$animal_id <- gsub("Right","",gsub("Left","",ss$Orginal_ID))
+
+ss %>% kbl(caption = "Sample sheet") %>%
+  kable_paper("hover", full_width = F)
+
+```
+
+## QC analysis
+
+Here I'll look at a few different quality control measures.
+
+```{r,qc1,fig.height=7,fig.width=7}
+
+par(mar=c(5,8,3,1))
+barplot(colSums(ll),horiz=TRUE,las=1,xlab="num reads",col=ss$cols)
+sums <- colSums(ll)
+sums <- sums[order(sums)]
+barplot(sums,horiz=TRUE,las=1,xlab="num reads")
+abline(v=15000000,col="red")
+
+```
+
+## MDS plot for all samples
+
+Multidimensional scaling plot to show the variation between all samples, very similar to PCA.
+
+Firstly with the data before aggregating technical replicates.
+
+```{r,mds0,fig.height=7,fig.width=7}
+
+mds <- cmdscale(dist(t(xx)))
+plot(mds, xlab="Coordinate 1", ylab="Coordinate 2",
+  type = "p",bty="n",pch=19, cex=4 ,col="gray")
+text(mds, labels=rownames(mds) )
+
+```
+
+That doesn't make much sense.
+Now I'll separate ACSS2 and ATP-CL experiments into different charts
+
+lightblue = ctrl
+
+pink = kd
+
+circle = sedentary
+
+square = exercise
+
+I will also make a barplot and boxplot of the ATP-CL gene expression, encoded by Acly.
+It will show whether there has been a measurable decrease in Acly expression between
+ctrl and kd groups.
+
+```{r,mds_atp,fig.height=7,fig.width=7}
+
+ss_atp <- ss[which(ss$target_gene=="ATP-CL"),]
+xx_atp <- xx[,which(colnames(xx) %in% rownames(ss_atp))]
+
+rpm_atp <- apply(xx_atp,2, function(x) { x / sum(x) * 1000000 } )
+
+acly <- unlist(rpm_atp[grep("Acly",rownames(rpm_atp)),,drop=TRUE])
+names(acly) <- paste(names(acly), ss_atp$construct)
+
+barplot(acly,horiz=TRUE,las=1,main="Acly expression",xlab="reads per million")
+
+ctrl <- acly[grep("ctrl",names(acly))]
+kd <- acly[grep("kd",names(acly))]
+mylist <- list("ctrl"=ctrl,"kd"=kd)
+boxplot(mylist,col="white",ylab="reads per million",main="Acly expression")
+beeswarm(mylist,pch=19,add=TRUE)
+myp <- signif(t.test(kd,ctrl)$p.value,3)
+mtext(paste("p=",myp))
+
+ratio <- kd/ctrl
+ratio <- ratio[order(ratio)]
+barplot(ratio,horiz=TRUE,las=1,xlab="relative quantification (kd/ctrl)",main="ATP-CL")
+
+# shapes for exercise or sedentary
+shapes <- as.numeric(factor(ss_atp$ex_sed))+14
+# colours for knock out or control
+colours <- as.numeric(factor(ss_atp$construct))
+colours <- gsub("2","pink",gsub("1","lightblue",as.character(colours)))
+
+mds <- cmdscale(dist(t(xx_atp)))
+plot(mds, xlab="Coordinate 1", ylab="Coordinate 2",
+  type = "p",bty="n",pch=shapes, cex=4 ,col=colours)
+mtext("ATP-CL study")
+text(mds, labels=ss_atp$animal_id , cex=1)
+
+legend("topright",
+  legend = c("ctrl sed", "ctrl ex", "kd sed" , "kd ex"),
+  col = c("lightblue","lightblue","pink","pink"),
+  pch = c(16,15,16,15),
+  pt.cex = 2,
+  cex = 1.2,
+  text.col = "black",
+  horiz = F ,
+  inset = c(0.1, 0.1))
+
+```
+
+Look at the effect of the ATP-CL KD in the Sed animals.
+
+```{r,mds1}
+
+ss_atp_sed <- ss_atp[which(ss_atp$ex_sed == "Sed"),]
+
+xx_atp_sed <- xx_atp[,which(colnames(xx_atp) %in% rownames(ss_atp_sed))]
+
+colours <- as.numeric(factor(ss_atp_sed$construct))
+colours <- gsub("2","pink",gsub("1","lightblue",as.character(colours)))
+
+mds <- cmdscale(dist(t(xx_atp_sed)))
+plot(mds, xlab="Coordinate 1", ylab="Coordinate 2",
+  type = "p",bty="n",pch=16, cex=4 ,col=colours)
+mtext("Effect of ATP-CL KD in Sed animals")
+text(mds, labels=ss_atp_sed$animal_id , cex=1)
+
+legend("topright",
+  legend = c("ctrl Sed", "kd Sed"),
+  col = c("lightblue","pink"),
+  pch = c(16,16),
+  pt.cex = 2,
+  cex = 1.2,
+  text.col = "black",
+  horiz = F ,
+  inset = c(0.1, 0.1))
+
+```
+
+Look at the effect of the ATP-CL KD in the Ex animals.
+
+```{r,mds2}
+
+ss_atp_ex <- ss_atp[which(ss_atp$ex_sed == "Ex"),]
+
+xx_atp_ex <- xx_atp[,which(colnames(xx_atp) %in% rownames(ss_atp_ex))]
+
+colours <- as.numeric(factor(ss_atp_ex$construct))
+colours <- gsub("2","pink",gsub("1","lightblue",as.character(colours)))
+
+mds <- cmdscale(dist(t(xx_atp_sed)))
+plot(mds, xlab="Coordinate 1", ylab="Coordinate 2",
+  type = "p",bty="n",pch=15, cex=4 ,col=colours)
+mtext("Effect of ATP-CL KD in Ex animals")
+text(mds, labels=ss_atp_ex$animal_id , cex=1)
+
+legend("topright",
+  legend = c("ctrl Ex", "kd Ex"),
+  col = c("lightblue","pink"),
+  pch = c(15,15),
+  pt.cex = 2,
+  cex = 1.2,
+  text.col = "black",
+  horiz = F ,
+  inset = c(0.1, 0.1))
+
+```
+
+Now look at the ACSS2 study.
+
+I will also make a barplot of the ACSS2 gene expression, encoded by Acss2.
+It will show whether there has been a measurable decrease in Acss2 expression between
+ctrl and kd groups.
+
+```{r,mds_acs}
+
+ss_acs <- ss[which(ss$target_gene=="ACSS2"),]
+xx_acs <- xx[,which(colnames(xx) %in% rownames(ss_acs))]
+
+rpm_acs <- apply(xx_acs,2, function(x) { x / sum(x) * 1000000 } )
+
+acss <- unlist(rpm_acs[grep("Acss2$",rownames(rpm_acs)),,drop=TRUE])
+names(acss) <- paste(names(acss) , ss_acs$construct)
+
+barplot(acss,horiz=TRUE,las=1,main="Acss2 expression",xlab="reads per million")
+
+ctrl <- acss[grep("ctrl",names(acss))]
+kd <- acss[grep("kd",names(acss))]
+mylist <- list("ctrl"=ctrl,"kd"=kd)
+boxplot(mylist,col="white",ylab="reads per million",main="Acss2 expression")
+beeswarm(mylist,pch=19,add=TRUE)
+myp <- signif(t.test(kd,ctrl)$p.value,3)
+mtext(paste("p=",myp))
+
+ratio <- kd/ctrl
+ratio <- ratio[order(ratio)]
+barplot(ratio,horiz=TRUE,las=1,xlab="relative quantification (kd/ctrl)",main="Acss2")
+
+# shapes for exercise or sedentary
+shapes <- as.numeric(factor(ss_acs$ex_sed))+14
+# colours for knock out or control
+colours <- as.numeric(factor(ss_acs$construct))
+colours <- gsub("2","pink",gsub("1","lightblue",as.character(colours)))
+
+mds <- cmdscale(dist(t(xx_acs)))
+plot(mds, xlab="Coordinate 1", ylab="Coordinate 2",
+  type = "p",bty="n",pch=shapes, cex=4 ,col=colours)
+mtext("ACSS2 study")
+text(mds, labels=ss_acs$animal_id , cex=1)
+
+legend("topright",
+  legend = c("ctrl sed", "ctrl ex", "kd sed" , "kd ex"),
+  col = c("lightblue","lightblue","pink","pink"),
+  pch = c(16,15,16,15),
+  pt.cex = 2,
+  cex = 1.2,
+  text.col = "black",
+  horiz = F ,
+  inset = c(0.1, 0.1))
+
+```
+
+Look at the effect of the ACSS2 KD in the Sed animals.
+
+```{r,mds3}
+
+ss_acs_sed <- ss_acs[which(ss_acs$ex_sed == "Sed"),]
+
+xx_acs_sed <- xx_acs[,which(colnames(xx_acs) %in% rownames(ss_acs_sed))]
+
+colours <- as.numeric(factor(ss_acs_sed$construct))
+colours <- gsub("2","pink",gsub("1","lightblue",as.character(colours)))
+
+mds <- cmdscale(dist(t(xx_acs_sed)))
+plot(mds, xlab="Coordinate 1", ylab="Coordinate 2",
+  type = "p",bty="n",pch=16, cex=4 ,col=colours)
+mtext("Effect of ACSS2 KD in Sed animals")
+text(mds, labels=ss_acs_sed$animal_id , cex=1)
+
+legend("topright",
+  legend = c("ctrl Sed", "kd Sed"),
+  col = c("lightblue","pink"),
+  pch = c(16,16),
+  pt.cex = 2,
+  cex = 1.2,
+  text.col = "black",
+  horiz = F ,
+  inset = c(0.1, 0.1))
+
+```
+
+Look at the effect of the ACSS2 KD in the Ex animals.
+
+```{r,mds4}
+
+ss_acs_ex <- ss_acs[which(ss_acs$ex_sed == "Ex"),]
+
+xx_acs_ex <- xx_acs[,which(colnames(xx_acs) %in% rownames(ss_acs_ex))]
+
+colours <- as.numeric(factor(ss_acs_ex$construct))
+colours <- gsub("2","pink",gsub("1","lightblue",as.character(colours)))
+
+mds <- cmdscale(dist(t(xx_acs_sed)))
+plot(mds, xlab="Coordinate 1", ylab="Coordinate 2",
+  type = "p",bty="n",pch=15, cex=4 ,col=colours)
+mtext("Effect of ACSS2 KD in Ex animals")
+text(mds, labels=ss_acs_ex$animal_id , cex=1)
+
+legend("topright",
+  legend = c("ctrl Ex", "kd Ex"),
+  col = c("lightblue","pink"),
+  pch = c(15,15),
+  pt.cex = 2,
+  cex = 1.2,
+  text.col = "black",
+  horiz = F ,
+  inset = c(0.1, 0.1))
+
+```
+
+## Correlation heatmap
+
+Search for outliers with a correlation heatmap.
+
+5176172 is potentially an outlier.
+
+```{r,cor1,fig.height=7,fig.width=7}
+
+heatmap.2(cor(xx),trace="n",main="Pearson correlation heatmap",margin=c(8,8))
+
+heatmap.2(cor(xx_atp),trace="n",main="Cor - ATP-CL",margin=c(8,8))
+
+heatmap.2(cor(xx_acs),trace="n",main="Cor - ACSS2",margin=c(8,8))
+
+```
+
+## Set up the different datasets for differential expression analysis
+
+Don't forget to remove poorly detected genes from the matrix with a threshold
+of 10 reads per sample on average.
+
+There are 4 contrasts to set up.
+
+1. Effect of ATP-CL KD in Sed animals. (ss_atp_sed)
+
+2. Effect of ATP-CL KD in Ex animals. (ss_atp_ex)
+
+3. Effect of ACSS2 KD in Sed animals. (ss_acs_sed)
+
+4. Effect of ACSS2 KD in Ex animals. (ss_acs_ex)
+
+There may be other contrasts we will add in future.
+
+### DGE 1 Effect of ATP-CL KD in Sed animals
+
+```{r,de01}
+
+dim(xx_atp_sed)
+xx_atp_sed <- xx_atp_sed[which(rowMeans(xx_atp_sed)>=10),]
+dim(xx_atp_sed)
+
+ss_atp_sed$construct <- factor(ss_atp_sed$construct,levels=c("ctrl","kd"))
+
+dds <- DESeqDataSetFromMatrix(countData = xx_atp_sed , colData = ss_atp_sed,
+  design = ~ construct )
+res <- DESeq(dds)
+z<- results(res)
+vsd <- vst(dds, blind=FALSE)
+zz <- cbind(as.data.frame(z),assay(vsd))
+dge <- as.data.frame(zz[order(zz$pvalue),])
+
+dge[1:20,1:6] %>%
+  kbl(caption = "Top gene expression differences for contrast 1: Effect of ATP-CL KD in Sed mice") %>%
+  kable_paper("hover", full_width = F)
+
+dge1 <- dge
+d1up <- rownames(subset(dge1,padj <= 0.05 & log2FoldChange > 0))
+d1dn <- rownames(subset(dge1,padj <= 0.05 & log2FoldChange < 0))
+write.table(dge1,file="dge1.tsv",quote=FALSE,sep="\t")
+
+```
+
+Now paired.
+
+```{r,de01paired}
+
+dim(xx_atp_sed)
+xx_atp_sed <- xx_atp_sed[which(rowMeans(xx_atp_sed)>=10),]
+dim(xx_atp_sed)
+
+ss_atp_sed$construct <- factor(ss_atp_sed$construct,levels=c("ctrl","kd"))
+
+dds <- DESeqDataSetFromMatrix(countData = xx_atp_sed , colData = ss_atp_sed,
+  design = ~ animal_id + construct )
+
+res <- DESeq(dds)
+z<- results(res)
+vsd <- vst(dds, blind=FALSE)
+zz <- cbind(as.data.frame(z),assay(vsd))
+dge <- as.data.frame(zz[order(zz$pvalue),])
+
+dge[1:20,1:6] %>%
+  kbl(caption = "Top gene expression differences for contrast 1: Effect of ATP-CL KD in Sed mice (paired)") %>%
+  kable_paper("hover", full_width = F)
+
+dge1p <- dge
+d1pup <- rownames(subset(dge1p,padj <= 0.05 & log2FoldChange > 0))
+d1pdn <- rownames(subset(dge1p,padj <= 0.05 & log2FoldChange < 0))
+write.table(dge1p,file="dge1p.tsv",quote=FALSE,sep="\t")
+
+```
+
+Paired and excluding poor ATP-CL knockdown samples.
+
+```{r,de01paired_kd}
+
+ss_atp_sed <- ss_atp[which(ss_atp$ex_sed == "Sed"),]
+xx_atp_sed <- xx_atp[,which(colnames(xx_atp) %in% rownames(ss_atp_sed))]
+ss_atp_sed$construct <- factor(ss_atp_sed$construct,levels=c("ctrl","kd"))
+rpm_atp_sed <- apply(xx_atp_sed,2,function(x) { x / sum(x) }) * 1000000
+ss_atp_sed$acly <- rpm_atp_sed[grep("Acly",rownames(rpm_atp_sed) ),]
+animals <- unique(ss_atp_sed$animal_id)
+animals_kd <- t( sapply(animals,function(a) {
+  ss_atp_sed[ss_atp_sed$animal_id==a,"acly"]
+} ) )
+animals_kd2 <- animals_kd[,1] / animals_kd[,2]
+# threshold
+animals_kd2 <- animals_kd2[order(animals_kd2)]
+barplot(animals_kd2, ylab="foldchange (kd/ctrl)",xlab="animal ID")
+animals_kd2 <- animals_kd2[animals_kd2<0.7]
+ss_atp_sed <- ss_atp_sed[ss_atp_sed$animal_id %in% names(animals_kd2),]
+ss_atp_sed %>%
+  kbl(caption = "Contrast 1: samples to use after filtering") %>%
+  kable_paper("hover", full_width = F)
+xx_atp_sed <- xx_atp_sed[,colnames(xx_atp_sed) %in% rownames(ss_atp_sed)]
+dim(xx_atp_sed)
+xx_atp_sed <- xx_atp_sed[which(rowMeans(xx_atp_sed)>=10),]
+dim(xx_atp_sed)
+dds <- DESeqDataSetFromMatrix(countData = xx_atp_sed , colData = ss_atp_sed,
+  design = ~ animal_id + construct )
+res <- DESeq(dds)
+z <- results(res)
+vsd <- vst(dds, blind=FALSE)
+zz <- cbind(as.data.frame(z),assay(vsd))
+dge <- as.data.frame(zz[order(zz$pvalue),])
+dge[1:20,1:6] %>%
+  kbl(caption = "Top gene expression differences for contrast 1: Effect of ATP-CL KD in Sed mice (paired)") %>%
+  kable_paper("hover", full_width = F)
+dge1p <- dge
+d1pup <- rownames(subset(dge1p,padj <= 0.05 & log2FoldChange > 0))
+d1pdn <- rownames(subset(dge1p,padj <= 0.05 & log2FoldChange < 0))
+write.table(dge1p,file="dge1pkd.tsv",quote=FALSE,sep="\t")
+
+```
+
+### DGE 2 Effect of ATP-CL KD in Ex animals
+
+```{r,de02}
+
+dim(xx_atp_ex)
+xx_atp_ex <- xx_atp_ex[which(rowMeans(xx_atp_ex)>=10),]
+dim(xx_atp_ex)
+
+ss_atp_ex$construct <- factor(ss_atp_ex$construct,levels=c("ctrl","kd"))
+
+dds <- DESeqDataSetFromMatrix(countData = xx_atp_ex , colData = ss_atp_ex,
+  design = ~ construct )
+res <- DESeq(dds)
+z<- results(res)
+vsd <- vst(dds, blind=FALSE)
+zz <- cbind(as.data.frame(z),assay(vsd))
+dge <- as.data.frame(zz[order(zz$pvalue),])
+
+dge[1:20,1:6] %>%
+  kbl(caption = "Top gene expression differences for contrast 1: Effect of ATP-CL KD in Ex mice") %>%
+  kable_paper("hover", full_width = F)
+
+dge2 <- dge
+d2up <- rownames(subset(dge2,padj <= 0.05 & log2FoldChange > 0))
+d2dn <- rownames(subset(dge2,padj <= 0.05 & log2FoldChange < 0))
+write.table(dge2,file="dge2.tsv",quote=FALSE,sep="\t")
+
+```
+
+Now paired.
+
+```{r,de02p}
+
+dim(xx_atp_ex)
+xx_atp_ex <- xx_atp_ex[which(rowMeans(xx_atp_ex)>=10),]
+dim(xx_atp_ex)
+
+ss_atp_ex$construct <- factor(ss_atp_ex$construct,levels=c("ctrl","kd"))
+
+dds <- DESeqDataSetFromMatrix(countData = xx_atp_ex , colData = ss_atp_ex,
+  design =  ~ animal_id + construct )
+res <- DESeq(dds)
+z<- results(res)
+vsd <- vst(dds, blind=FALSE)
+zz <- cbind(as.data.frame(z),assay(vsd))
+dge <- as.data.frame(zz[order(zz$pvalue),])
+
+dge[1:20,1:6] %>%
+  kbl(caption = "Top gene expression differences for contrast 1: Effect of ATP-CL KD in Ex mice (paired)") %>%
+  kable_paper("hover", full_width = F)
+
+dge2p <- dge
+d2pup <- rownames(subset(dge2p,padj <= 0.05 & log2FoldChange > 0))
+d2pdn <- rownames(subset(dge2p,padj <= 0.05 & log2FoldChange < 0))
+write.table(dge2p,file="dge2p.tsv",quote=FALSE,sep="\t")
+
+```
+
+Paired and excluding poor ATP-CL knockdown samples.
+
+```{r,de02paired_kd}
+
+ss_atp_ex <- ss_atp[which(ss_atp$ex_sed == "Ex"),]
+xx_atp_ex <- xx_atp[,which(colnames(xx_atp) %in% rownames(ss_atp_ex))]
+ss_atp_ex$construct <- factor(ss_atp_ex$construct,levels=c("ctrl","kd"))
+rpm_atp_ex <- apply(xx_atp_ex,2,function(x) { x / sum(x) }) * 1000000
+ss_atp_ex$acly <- rpm_atp_ex[grep("Acly",rownames(rpm_atp_ex) ),]
+animals <- unique(ss_atp_ex$animal_id)
+animals_kd <- t( sapply(animals,function(a) {
+  ss_atp_ex[ss_atp_ex$animal_id==a,"acly"]
+} ) )
+animals_kd2 <- animals_kd[,1] / animals_kd[,2]
+# threshold
+animals_kd2 <- animals_kd2[order(animals_kd2)]
+barplot(animals_kd2, ylab="foldchange (kd/ctrl)",xlab="animal ID")
+animals_kd2 <- animals_kd2[animals_kd2<0.7]
+ss_atp_ex <- ss_atp_ex[ss_atp_ex$animal_id %in% names(animals_kd2),]
+ss_atp_ex %>%
+  kbl(caption = "Contrast 2: samples to use after filtering") %>%
+  kable_paper("hover", full_width = F)
+xx_atp_ex <- xx_atp_ex[,colnames(xx_atp_ex) %in% rownames(ss_atp_ex)]
+dim(xx_atp_ex)
+xx_atp_ex <- xx_atp_ex[which(rowMeans(xx_atp_ex)>=10),]
+dim(xx_atp_ex)
+dds <- DESeqDataSetFromMatrix(countData = xx_atp_ex , colData = ss_atp_ex,
+  design =  ~ animal_id + construct )
+res <- DESeq(dds)
+z<- results(res)
+vsd <- vst(dds, blind=FALSE)
+zz <- cbind(as.data.frame(z),assay(vsd))
+dge <- as.data.frame(zz[order(zz$pvalue),])
+dge[1:20,1:6] %>%
+  kbl(caption = "Top gene expression differences for contrast 1: Effect of ATP-CL KD in Ex mice (paired)") %>%
+  kable_paper("hover", full_width = F)
+dge2p <- dge
+d2pup <- rownames(subset(dge2p,padj <= 0.05 & log2FoldChange > 0))
+d2pdn <- rownames(subset(dge2p,padj <= 0.05 & log2FoldChange < 0))
+write.table(dge2p,file="dge2pkd.tsv",quote=FALSE,sep="\t")
+
+```
+
+### DGE 3 Effect of ACSS2 KD in Sed animals
+
+```{r,de03}
+
+dim(xx_acs_sed)
+xx_acs_sed <- xx_acs_sed[which(rowMeans(xx_acs_sed)>=10),]
+dim(xx_acs_sed)
+
+ss_acs_sed$construct <- factor(ss_acs_sed$construct,levels=c("ctrl","kd"))
+
+dds <- DESeqDataSetFromMatrix(countData = xx_acs_sed , colData = ss_acs_sed,
+  design = ~ construct )
+res <- DESeq(dds)
+z<- results(res)
+vsd <- vst(dds, blind=FALSE)
+zz <- cbind(as.data.frame(z),assay(vsd))
+dge <- as.data.frame(zz[order(zz$pvalue),])
+
+dge[1:20,1:6] %>%
+  kbl(caption = "Top gene expression differences for contrast 1: Effect of ACSS2 KD in Sed mice") %>%
+  kable_paper("hover", full_width = F)
+
+dge3 <- dge
+d3up <- rownames(subset(dge3,padj <= 0.05 & log2FoldChange > 0))
+d3dn <- rownames(subset(dge3,padj <= 0.05 & log2FoldChange < 0))
+write.table(dge3,file="dge3.tsv",quote=FALSE,sep="\t")
+
+```
+
+Now paired.
+
+```{r,de03p}
+
+dim(xx_acs_sed)
+xx_acs_sed <- xx_acs_sed[which(rowMeans(xx_acs_sed)>=10),]
+dim(xx_acs_sed)
+
+ss_acs_sed$construct <- factor(ss_acs_sed$construct,levels=c("ctrl","kd"))
+
+dds <- DESeqDataSetFromMatrix(countData = xx_acs_sed , colData = ss_acs_sed,
+  design = ~ animal_id + construct )
+res <- DESeq(dds)
+z<- results(res)
+vsd <- vst(dds, blind=FALSE)
+zz <- cbind(as.data.frame(z),assay(vsd))
+dge <- as.data.frame(zz[order(zz$pvalue),])
+
+dge[1:20,1:6] %>%
+  kbl(caption = "Top gene expression differences for contrast 1: Effect of ACSS2 KD in Sed mice") %>%
+  kable_paper("hover", full_width = F)
+
+dge3p <- dge
+d3pup <- rownames(subset(dge3p,padj <= 0.05 & log2FoldChange > 0))
+d3pdn <- rownames(subset(dge3p,padj <= 0.05 & log2FoldChange < 0))
+write.table(dge3p,file="dge3p.tsv",quote=FALSE,sep="\t")
+
+```
+
+Paired and excluding poor ACSS2 knockdown samples.
+
+```{r,de03paired_kd}
+
+ss_acs_sed <- ss_acs[which(ss_acs$ex_sed == "Sed"),]
+xx_acs_sed <- xx_acs[,which(colnames(xx_acs) %in% rownames(ss_acs_sed))]
+ss_acs_sed$construct <- factor(ss_acs_sed$construct,levels=c("ctrl","kd"))
+rpm_acs_sed <- apply(xx_acs_sed,2,function(x) { x / sum(x) }) * 1000000
+ss_acs_sed$acly <- rpm_acs_sed[grep("Acly",rownames(rpm_acs_sed) ),]
+animals <- unique(ss_acs_sed$animal_id)
+animals_kd <- t( sapply(animals,function(a) {
+  ss_acs_sed[ss_acs_sed$animal_id==a,"acly"]
+} ) )
+animals_kd2 <- animals_kd[,1] / animals_kd[,2]
+# threshold
+animals_kd2 <- animals_kd2[order(animals_kd2)]
+barplot(animals_kd2, ylab="foldchange (kd/ctrl)",xlab="animal ID")
+animals_kd2 <- animals_kd2[animals_kd2<0.7]
+ss_acs_sed <- ss_acs_sed[ss_acs_sed$animal_id %in% names(animals_kd2),]
+ss_acs_sed %>%
+  kbl(caption = "Contrast 3: samples to use after filtering") %>%
+  kable_paper("hover", full_width = F)
+xx_acs_sed <- xx_acs_sed[,colnames(xx_acs_sed) %in% rownames(ss_acs_sed)]
+dim(xx_acs_sed)
+xx_acs_sed <- xx_acs_sed[which(rowMeans(xx_acs_sed)>=10),]
+dim(xx_acs_sed)
+dds <- DESeqDataSetFromMatrix(countData = xx_acs_sed , colData = ss_acs_sed,
+  design = ~ animal_id + construct )
+res <- DESeq(dds)
+z <- results(res)
+vsd <- vst(dds, blind=FALSE)
+zz <- cbind(as.data.frame(z),assay(vsd))
+dge <- as.data.frame(zz[order(zz$pvalue),])
+dge[1:20,1:6] %>%
+  kbl(caption = "Top gene expression differences for contrast 3: Effect of ACSS2 KD in Sed mice (paired)") %>%
+  kable_paper("hover", full_width = F)
+dge3p <- dge
+d3pup <- rownames(subset(dge3p,padj <= 0.05 & log2FoldChange > 0))
+d3pdn <- rownames(subset(dge3p,padj <= 0.05 & log2FoldChange < 0))
+write.table(dge3p,file="dge3pkd.tsv",quote=FALSE,sep="\t")
+
+```
+
+### DGE 4 Effect of ACSS2 KD in Ex animals
+
+```{r,de04}
+
+dim(xx_acs_ex)
+xx_acs_ex <- xx_acs_ex[which(rowMeans(xx_acs_ex)>=10),]
+dim(xx_acs_ex)
+
+ss_acs_ex$construct <- factor(ss_acs_ex$construct,levels=c("ctrl","kd"))
+
+dds <- DESeqDataSetFromMatrix(countData = xx_acs_ex , colData = ss_acs_ex,
+  design = ~ construct )
+res <- DESeq(dds)
+z<- results(res)
+vsd <- vst(dds, blind=FALSE)
+zz <- cbind(as.data.frame(z),assay(vsd))
+dge <- as.data.frame(zz[order(zz$pvalue),])
+
+dge[1:20,1:6] %>%
+  kbl(caption = "Top gene expression differences for contrast 1: Effect of ACSS2 KD in Ex mice") %>%
+  kable_paper("hover", full_width = F)
+
+dge4 <- dge
+d4up <- rownames(subset(dge4,padj <= 0.05 & log2FoldChange > 0))
+d4dn <- rownames(subset(dge4,padj <= 0.05 & log2FoldChange < 0))
+write.table(dge4,file="dge4.tsv",quote=FALSE,sep="\t")
+
+```
+
+Now paired.
+
+```{r,de04p}
+
+dim(xx_acs_ex)
+xx_acs_ex <- xx_acs_ex[which(rowMeans(xx_acs_ex)>=10),]
+dim(xx_acs_ex)
+
+ss_acs_ex$construct <- factor(ss_acs_ex$construct,levels=c("ctrl","kd"))
+
+dds <- DESeqDataSetFromMatrix(countData = xx_acs_ex , colData = ss_acs_ex,
+  design = ~ animal_id + construct )
+res <- DESeq(dds)
+z<- results(res)
+vsd <- vst(dds, blind=FALSE)
+zz <- cbind(as.data.frame(z),assay(vsd))
+dge <- as.data.frame(zz[order(zz$pvalue),])
+
+dge[1:20,1:6] %>%
+  kbl(caption = "Top gene expression differences for contrast 1: Effect of ACSS2 KD in Ex mice") %>%
+  kable_paper("hover", full_width = F)
+
+dge4p <- dge
+d4pup <- rownames(subset(dge4p,padj <= 0.05 & log2FoldChange > 0))
+d4pdn <- rownames(subset(dge4p,padj <= 0.05 & log2FoldChange < 0))
+write.table(dge4p,file="dge4p.tsv",quote=FALSE,sep="\t")
+
+```
+
+Paired and excluding poor ACSS2 knockdown samples.
+
+```{r,de04paired_kd}
+
+ss_acs_ex <- ss_acs[which(ss_acs$ex_sed == "Ex"),]
+xx_acs_ex <- xx_acs[,which(colnames(xx_acs) %in% rownames(ss_acs_ex))]
+ss_acs_ex$construct <- factor(ss_acs_ex$construct,levels=c("ctrl","kd"))
+rpm_acs_ex <- apply(xx_acs_ex,2,function(x) { x / sum(x) }) * 1000000
+ss_acs_ex$acss2 <- rpm_acs_ex[grep("Acss2$",rownames(rpm_acs_ex) ),]
+animals <- unique(ss_acs_ex$animal_id)
+animals_kd <- t( sapply(animals,function(a) {
+  ss_acs_ex[ss_acs_ex$animal_id==a,"acss2"]
+} ) )
+animals_kd2 <- animals_kd[,1] / animals_kd[,2]
+# threshold
+animals_kd2 <- animals_kd2[order(animals_kd2)]
+barplot(animals_kd2, ylab="foldchange (kd/ctrl)",xlab="animal ID")
+animals_kd2 <- animals_kd2[animals_kd2<0.7]
+ss_acs_ex <- ss_acs_ex[ss_acs_ex$animal_id %in% names(animals_kd2),]
+ss_acs_ex %>%
+  kbl(caption = "Contrast 4: samples to use after filtering") %>%
+  kable_paper("hover", full_width = F)
+xx_acs_ex <- xx_acs_ex[,colnames(xx_acs_ex) %in% rownames(ss_acs_ex)]
+dim(xx_acs_ex)
+xx_acs_ex <- xx_acs_ex[which(rowMeans(xx_acs_ex)>=10),]
+dim(xx_acs_ex)
+dds <- DESeqDataSetFromMatrix(countData = xx_acs_ex , colData = ss_acs_ex,
+  design = ~ animal_id + construct )
+res <- DESeq(dds)
+z <- results(res)
+vsd <- vst(dds, blind=FALSE)
+zz <- cbind(as.data.frame(z),assay(vsd))
+dge <- as.data.frame(zz[order(zz$pvalue),])
+dge[1:20,1:6] %>%
+  kbl(caption = "Top gene expression differences for contrast 3: Effect of ACSS2 KD in Sed mice (paired)") %>%
+  kable_paper("hover", full_width = F)
+dge4p <- dge
+d4pup <- rownames(subset(dge4p,padj <= 0.05 & log2FoldChange > 0))
+d4pdn <- rownames(subset(dge4p,padj <= 0.05 & log2FoldChange < 0))
+write.table(dge4p,file="dge4pkd.tsv",quote=FALSE,sep="\t")
+
+```
+
+### DGE 5 Effect of Sed vs Ex (ATP-CL gene ctrl)
+
+```{r,de05}
+
+ss5 <- subset(ss,target_gene=="ATP-CL" & construct=="ctrl")
+xx5 <- xx[,colnames(xx) %in% ss5$Sample_ID ]
+dim(xx5)
+xx5 <- xx5[which(rowMeans(xx5)>=10),]
+dim(xx5)
+
+ss5$ex_sed <- factor(ss5$ex_sed,levels=c("Sed","Ex"))
+
+dds <- DESeqDataSetFromMatrix(countData = xx5 , colData = ss5, design = ~ ex_sed )
+res <- DESeq(dds)
+z<- results(res)
+vsd <- vst(dds, blind=FALSE)
+zz <- cbind(as.data.frame(z),assay(vsd))
+dge <- as.data.frame(zz[order(zz$pvalue),])
+
+dge[1:20,1:6] %>%
+  kbl(caption = "Top gene expression differences for contrast 5: Effect of exercise in ATP-CL ctrl mice") %>%
+  kable_paper("hover", full_width = F)
+
+dge5 <- dge
+d5up <- rownames(subset(dge5,padj <= 0.05 & log2FoldChange > 0))
+d5dn <- rownames(subset(dge5,padj <= 0.05 & log2FoldChange < 0))
+write.table(dge5,file="dge5.tsv",quote=FALSE,sep="\t")
+
+```
+
+### DGE 6 Effect of Sed vs Ex (ATP-CL gene KO)
+
+```{r,de06}
+
+ss6 <- subset(ss,target_gene=="ATP-CL" & construct=="kd")
+xx6 <- xx[,colnames(xx) %in% ss6$Sample_ID ]
+dim(xx6)
+xx6 <- xx6[which(rowMeans(xx6)>=10),]
+dim(xx6)
+
+ss6$ex_sed <- factor(ss5$ex_sed,levels=c("Sed","Ex"))
+
+dds <- DESeqDataSetFromMatrix(countData = xx6 , colData = ss6, design = ~ ex_sed )
+res <- DESeq(dds)
+z<- results(res)
+vsd <- vst(dds, blind=FALSE)
+zz <- cbind(as.data.frame(z),assay(vsd))
+dge <- as.data.frame(zz[order(zz$pvalue),])
+
+dge[1:20,1:6] %>%
+  kbl(caption = "Top gene expression differences for contrast 5: Effect of exercise in ctrl mice") %>%
+  kable_paper("hover", full_width = F)
+
+dge6 <- dge
+d6up <- rownames(subset(dge6,padj <= 0.05 & log2FoldChange > 0))
+d6dn <- rownames(subset(dge6,padj <= 0.05 & log2FoldChange < 0))
+write.table(dge6,file="dge6.tsv",quote=FALSE,sep="\t")
+
+```
+
+Now to remove samples where the KD didn't work.
+
+```{r,de06kd}
+
+ss6 <- subset(ss,target_gene=="ATP-CL" & construct=="kd")
+xx6 <- xx[,colnames(xx) %in% ss6$Sample_ID ]
+
+rpm6 <- apply(xx6,2, function(x) { x / sum(x) } ) *1000000
+acly <- rpm6[grep("Acly",rownames(rpm6)),]
+barplot(acly ,horiz=TRUE, las=1)
+ss6$acly <- acly
+
+ss6 <- subset(ss6,acly<11)
+xx6 <- xx[,colnames(xx) %in% ss6$Sample_ID ]
+
+dim(xx6)
+xx6 <- xx6[which(rowMeans(xx6)>=10),]
+dim(xx6)
+
+ss6$ex_sed <- factor(ss6$ex_sed,levels=c("Sed","Ex"))
+
+dds <- DESeqDataSetFromMatrix(countData = xx6 , colData = ss6, design = ~ ex_sed )
+res <- DESeq(dds)
+z<- results(res)
+vsd <- vst(dds, blind=FALSE)
+zz <- cbind(as.data.frame(z),assay(vsd))
+dge <- as.data.frame(zz[order(zz$pvalue),])
+
+dge[1:20,1:6] %>%
+  kbl(caption = "Top gene expression differences for contrast 5: Effect of exercise in ctrl mice") %>%
+  kable_paper("hover", full_width = F)
+
+dge6 <- dge
+d6up <- rownames(subset(dge6,padj <= 0.05 & log2FoldChange > 0))
+d6dn <- rownames(subset(dge6,padj <= 0.05 & log2FoldChange < 0))
+write.table(dge6,file="dge6kd.tsv",quote=FALSE,sep="\t")
+
+```
+
+### DGE 7 Effect of Sed vs Ex (ACSS2 gene ctrl)
+
+```{r,de07}
+
+ss7 <- subset(ss,target_gene=="ACSS2" & construct=="ctrl")
+xx7 <- xx[,colnames(xx) %in% ss7$Sample_ID ]
+dim(xx7)
+xx7 <- xx7[which(rowMeans(xx7)>=10),]
+dim(xx7)
+
+ss7$ex_sed <- factor(ss7$ex_sed,levels=c("Sed","Ex"))
+
+dds <- DESeqDataSetFromMatrix(countData = xx7 , colData = ss7, design = ~ ex_sed )
+res <- DESeq(dds)
+z<- results(res)
+vsd <- vst(dds, blind=FALSE)
+zz <- cbind(as.data.frame(z),assay(vsd))
+dge <- as.data.frame(zz[order(zz$pvalue),])
+
+dge[1:20,1:6] %>%
+  kbl(caption = "Top gene expression differences for contrast 5: Effect of exercise in ACSS2 ctrl mice") %>%
+  kable_paper("hover", full_width = F)
+
+dge7 <- dge
+d7up <- rownames(subset(dge7,padj <= 0.05 & log2FoldChange > 0))
+d7dn <- rownames(subset(dge7,padj <= 0.05 & log2FoldChange < 0))
+write.table(dge7,file="dge7.tsv",quote=FALSE,sep="\t")
+
+```
+
+### DGE 8 Effect of Sed vs Ex (ACSS2 gene kd)
+
+```{r,de08}
+
+ss8 <- subset(ss,target_gene=="ACSS2" & construct=="kd")
+xx8 <- xx[,colnames(xx) %in% ss8$Sample_ID ]
+dim(xx8)
+xx8 <- xx8[which(rowMeans(xx8)>=10),]
+dim(xx8)
+ss8$ex_sed <- factor(ss8$ex_sed,levels=c("Sed","Ex"))
+dds <- DESeqDataSetFromMatrix(countData = xx8 , colData = ss8, design = ~ ex_sed )
+res <- DESeq(dds)
+z<- results(res)
+vsd <- vst(dds, blind=FALSE)
+zz <- cbind(as.data.frame(z),assay(vsd))
+dge <- as.data.frame(zz[order(zz$pvalue),])
+dge[1:20,1:6] %>%
+  kbl(caption = "Top gene expression differences for contrast 5: Effect of exercise in ACSS2 kd mice") %>%
+  kable_paper("hover", full_width = F)
+dge8 <- dge
+d8up <- rownames(subset(dge8,padj <= 0.05 & log2FoldChange > 0))
+d8dn <- rownames(subset(dge8,padj <= 0.05 & log2FoldChange < 0))
+write.table(dge8,file="dge8.tsv",quote=FALSE,sep="\t")
+
+```
+
+Now to remove samples with RPM>30 Acss2 expression
+
+```{r,de08kd}
+
+ss8 <- subset(ss,target_gene=="ACSS2" & construct=="kd")
+xx8 <- xx[,colnames(xx) %in% ss8$Sample_ID ]
+
+rpm8 <- apply(xx8,2, function(x) { x / sum(x) } ) *1000000
+acss2 <- rpm6[grep("Acss2$",rownames(rpm6)),]
+barplot(acss2 ,horiz=TRUE, las=1)
+ss8$acss2 <- acss2
+
+ss8 <-subset(ss8,acss2<30)
+xx8 <- xx[,colnames(xx) %in% ss8$Sample_ID ]
+
+dim(xx8)
+xx8 <- xx8[which(rowMeans(xx8)>=10),]
+dim(xx8)
+
+ss8$ex_sed <- factor(ss8$ex_sed,levels=c("Sed","Ex"))
+
+dds <- DESeqDataSetFromMatrix(countData = xx8 , colData = ss8, design = ~ ex_sed )
+res <- DESeq(dds)
+z<- results(res)
+vsd <- vst(dds, blind=FALSE)
+zz <- cbind(as.data.frame(z),assay(vsd))
+dge <- as.data.frame(zz[order(zz$pvalue),])
+
+dge[1:20,1:6] %>%
+  kbl(caption = "Top gene expression differences for contrast 5: Effect of exercise in ACSS2 kd mice") %>%
+  kable_paper("hover", full_width = F)
+
+dge8 <- dge
+d8up <- rownames(subset(dge8,padj <= 0.05 & log2FoldChange > 0))
+d8dn <- rownames(subset(dge8,padj <= 0.05 & log2FoldChange < 0))
+write.table(dge8,file="dge8kd.tsv",quote=FALSE,sep="\t")
+
+```
+
+## Conclusion
+
+Some observations:
+
+* Read counts were a bit low which translated to a smaller number of genes detected.
+Typically this is in the range of ~15000 but we detected ~9500 in the 4 contrasts considered here.
+This may impact the number of genes that are detected as differentially expressed.
+
+* Acly (which encodes ATP-CL) was not measured at a sufficiently high level, and
+did not exhibit a decrease in KD mice.
+
+* Acly knock-down did not result in any major gene expression changes in Sed or Ex mice.
+
+* Acss2 was detected at a relatively low level, and it did exhibit a decrease in kd samples.
+
+* Animal 6 might be an outlier in the Acss2 study (5176172).
+
+* DESeq2 identified Acss2 as significantly downregulated in the ks mice but there were no
+other significant differences.
+
+* In the list of top significant genes for Acss2 kd in Ex mice, there are some mitochondrial and
+metabolism genes.
+These are likely themes for pathway analysis.
+
+* As the success of the knockdown was not consistent, we may need to omit animals or take a
+different approach to the expression analysis.
+For example by contructing the expression analysis by looking for genes that correlate with Acly and
+Acss2 instead of a case-control design.
+
+## Session information
+
+```{r,session}
+
+sessionInfo()
+
+```
