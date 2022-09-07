@@ -159,7 +159,7 @@ mitch_report(res=res2,outfile="mitch_de2.html",overwrite=TRUE)
 
 res3 <- mitch_calc(de3, genesets, priority="effect")
 head(res3$enrichment_result,20) %>% kbl(caption="DE3: Reactome") %>% kable_styling()
-mitch_report(res=res3,outfile="mitch_de3.html",overwrite=TRUE)
+#mitch_report(res=res3,outfile="mitch_de3.html",overwrite=TRUE)
 
 res4 <- mitch_calc(de4, genesets, priority="effect")
 head(res4$enrichment_result,20) %>% kbl(caption="DE4: Reactome") %>% kable_styling()
@@ -231,7 +231,7 @@ B4 (DE7 and DE8): Effect of Sed vs Ex in ctrl and ACSS2 gene KD
 
 ```{r,bi4}
 
-b4 <- merge(de7,de7,by=0)
+b4 <- merge(de7,de8,by=0)
 rownames(b4) <- b4$Row.names
 b4$Row.names=NULL
 colnames(b4) <- c("ctrl","Acss2KD")
@@ -262,6 +262,7 @@ jj$gene=NULL
 dim(jj)
 
 resm <- mitch_calc(jj, genesets, priority="effect")
+head(resm$enrichment_result,20) %>% kbl(caption="Multimitch") %>% kable_styling()
 mitch_report(res=resm,outfile="mitch_m.html",overwrite=TRUE)
 
 ```
