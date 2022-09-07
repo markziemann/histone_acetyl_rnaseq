@@ -1,0 +1,281 @@
+---
+title: "Histone Acetyl RNA-seq Enrichment analysis"
+author: "Mark Ziemann"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    code_folding: hide
+    fig_width: 7
+    fig_height: 7
+theme: cosmo
+---
+
+Source: https://github.com/markziemann/histone_acetyl_rnaseq
+
+# Introduction
+
+In this study we are looking at the effect of knock-down of two genes which are required
+for the supply of acetyl units.
+It is hypothesised that knock-down of these genes could lead to problems with
+the response to exercise.
+We have both ctrl and kd under either sedentary or exercise conditions.
+
+The focus of this report is to perform mitch enrichment analysis of the DE tables
+I have already generated.
+
+Here are the DE analyses I've already performed.
+
+| Contrast number | DE file | Contrast |
+| --- | --- | --- |
+| 1 | dge1pkd.tsv | Effect of ATP-CL KD in Sed animals |
+| 2 | dge2pkd.tsv | Effect of ATP-CL KD in Ex animals |
+| 3 | dge3pkd.tsv | Effect of ACSS2 KD in Sed animals |
+| 4 | dge4pkd.tsv | Effect of ACSS2 KD in Ex animals |
+| 5 | dge5.tsv | Effect of Sed vs Ex (ATP-CL gene ctrl) |
+| 6 | dge6kd.tsv | Effect of Sed vs Ex (ATP-CL gene KO) |
+| 7 | dge7.tsv | Effect of Sed vs Ex (ACSS2 gene ctrl) |
+| 8 | dge8kd.tsv | Effect of Sed vs Ex (ACSS2 gene kd) |
+
+First I will run mitch with each contrast separately,
+then joint enrichment in the following ways:
+
+* #1 and #2 effect of ATP-CL KD in Sed and Ex animals
+
+* #3 and #4 effect of ACSS2 KD in Sed and Ex animals
+
+* #5 and #6 Effect of Sed vs Ex in ctrl and ATP-CL gene KD
+
+* #7 and #8 Effect of Sed vs Ex in ctrl and ACSS2 gene KD
+
+Finally all contrasts altogether.
+
+```{r,packages}
+
+suppressPackageStartupMessages({
+    library("plyr")
+    library("zoo")
+    library("tidyverse")
+    library("reshape2")
+    library("DESeq2")
+    library("gplots")
+    library("fgsea")
+    library("MASS")
+    library("mitch")
+    library("eulerr")
+    library("limma")
+    library("topconfects")
+    library("kableExtra")
+    library("vioplot")
+    library("beeswarm")
+})
+
+```
+
+## Import DE data
+
+```{r,load1}
+
+de1 <- read.csv("dge1pkd.tsv",header=TRUE,row.names=1,sep="\t")
+de2 <- read.csv("dge2pkd.tsv",header=TRUE,row.names=1,sep="\t")
+de3 <- read.csv("dge3pkd.tsv",header=TRUE,row.names=1,sep="\t")
+de4 <- read.csv("dge4pkd.tsv",header=TRUE,row.names=1,sep="\t")
+de5 <- read.csv("dge5.tsv",header=TRUE,row.names=1,sep="\t")
+de6 <- read.csv("dge6kd.tsv",header=TRUE,row.names=1,sep="\t")
+de7 <- read.csv("dge7.tsv",header=TRUE,row.names=1,sep="\t")
+de8 <- read.csv("dge8kd.tsv",header=TRUE,row.names=1,sep="\t")
+
+```
+
+## Unidimensional mitch
+
+First format the data into a friendly format.
+
+```{r,1d}
+
+genesets <- gmt_import("https://ziemann-lab.net/public/msigdb_mouse/reactome.v5.2.symbols_mouse.gmt")
+
+de1$gene <- sapply(strsplit(rownames(de1)," "),"[[",2)
+de1 <- aggregate(stat ~ gene,de1,mean)
+de1rn <- de1
+rownames(de1) <- de1$gene
+de1$gene=NULL
+
+de2$gene <- sapply(strsplit(rownames(de2)," "),"[[",2)
+de2 <- aggregate(stat ~ gene,de2,mean)
+de2rn <- de2
+rownames(de2) <- de2$gene
+de2$gene=NULL
+
+de3$gene <- sapply(strsplit(rownames(de3)," "),"[[",2)
+de3 <- aggregate(stat ~ gene,de3,mean)
+de3rn <- de3
+rownames(de3) <- de3$gene
+de3$gene=NULL
+
+de4$gene <- sapply(strsplit(rownames(de4)," "),"[[",2)
+de4 <- aggregate(stat ~ gene,de4,mean)
+de4rn <- de4
+rownames(de4) <- de4$gene
+de4$gene=NULL
+
+de5$gene <- sapply(strsplit(rownames(de5)," "),"[[",2)
+de5 <- aggregate(stat ~ gene,de5,mean)
+de5rn <- de5
+rownames(de5) <- de5$gene
+de5$gene=NULL
+
+de6$gene <- sapply(strsplit(rownames(de6)," "),"[[",2)
+de6 <- aggregate(stat ~ gene,de6,mean)
+de6rn <- de6
+rownames(de6) <- de6$gene
+de6$gene=NULL
+
+de7$gene <- sapply(strsplit(rownames(de7)," "),"[[",2)
+de7 <- aggregate(stat ~ gene,de7,mean)
+de7rn <- de7
+rownames(de7) <- de7$gene
+de7$gene=NULL
+
+de8$gene <- sapply(strsplit(rownames(de8)," "),"[[",2)
+de8 <- aggregate(stat ~ gene,de8,mean)
+de8rn <- de8
+rownames(de8) <- de8$gene
+de8$gene=NULL
+
+```
+Enrich it.
+
+```{r,enrich1}
+
+res1 <- mitch_calc(de1, genesets, priority="effect")
+head(res1$enrichment_result,20) %>% kbl(caption="DE1: Reactome") %>% kable_styling()
+mitch_report(res=res1,outfile="mitch_de1.html",overwrite=TRUE)
+
+res2 <- mitch_calc(de2, genesets, priority="effect")
+head(res2$enrichment_result,20) %>% kbl(caption="DE2: Reactome") %>% kable_styling()
+mitch_report(res=res2,outfile="mitch_de2.html",overwrite=TRUE)
+
+res3 <- mitch_calc(de3, genesets, priority="effect")
+head(res3$enrichment_result,20) %>% kbl(caption="DE3: Reactome") %>% kable_styling()
+mitch_report(res=res3,outfile="mitch_de3.html",overwrite=TRUE)
+
+res4 <- mitch_calc(de4, genesets, priority="effect")
+head(res4$enrichment_result,20) %>% kbl(caption="DE4: Reactome") %>% kable_styling()
+mitch_report(res=res4,outfile="mitch_de4.html",overwrite=TRUE)
+
+res5 <- mitch_calc(de5, genesets, priority="effect")
+head(res5$enrichment_result,20) %>% kbl(caption="DE5: Reactome") %>% kable_styling()
+mitch_report(res=res5,outfile="mitch_de5.html",overwrite=TRUE)
+
+res6 <- mitch_calc(de6, genesets, priority="effect")
+head(res6$enrichment_result,20) %>% kbl(caption="DE6: Reactome") %>% kable_styling()
+mitch_report(res=res6,outfile="mitch_de6.html",overwrite=TRUE)
+
+res7 <- mitch_calc(de7, genesets, priority="effect")
+head(res7$enrichment_result,20) %>% kbl(caption="DE7: Reactome") %>% kable_styling()
+mitch_report(res=res7,outfile="mitch_de7.html",overwrite=TRUE)
+
+res8 <- mitch_calc(de8, genesets, priority="effect")
+head(res8$enrichment_result,20) %>% kbl(caption="DE8: Reactome") %>% kable_styling()
+mitch_report(res=res8,outfile="mitch_de8.html",overwrite=TRUE)
+
+```
+
+## Bidimensional
+
+B1 (DE1 and DE2): effect of ATP-CL KD in Sed and Ex animals
+
+```{r,bi1}
+
+b1 <- merge(de1,de2,by=0)
+rownames(b1) <- b1$Row.names
+b1$Row.names=NULL
+colnames(b1) <- c("Sed","Ex")
+resb1 <- mitch_calc(b1, genesets, priority="effect")
+head(resb1$enrichment_result,20) %>% kbl(caption="effect of ATP-CL KD in Sed and Ex animals") %>% kable_styling()
+mitch_report(res=resb1,outfile="mitch_b1.html",overwrite=TRUE)
+
+```
+
+B2 (DE3 and DE4): effect of ACSS2 KD in Sed and Ex animals
+
+```{r,bi2}
+
+b2 <- merge(de3,de4,by=0)
+rownames(b2) <- b2$Row.names
+b2$Row.names=NULL
+colnames(b2) <- c("Sed","Ex")
+resb2 <- mitch_calc(b2, genesets, priority="effect")
+head(resb2$enrichment_result,20) %>% kbl(caption="effect of ACSS2 KD in Sed and Ex animals") %>% kable_styling()
+mitch_report(res=resb2,outfile="mitch_b2.html",overwrite=TRUE)
+
+```
+
+B3 (DE5 and DE6): Effect of Sed vs Ex in ctrl and ATP-CL gene KD
+
+```{r,bi3}
+
+b3 <- merge(de5,de6,by=0)
+rownames(b3) <- b3$Row.names
+b3$Row.names=NULL
+colnames(b3) <- c("ctrl","AcyKD")
+resb3 <- mitch_calc(b3, genesets, priority="effect")
+head(resb3$enrichment_result,20) %>% kbl(caption="effect of  Sed vs Ex in ctrl and ATP-CL gene KD") %>% kable_styling()
+mitch_report(res=resb3,outfile="mitch_b3.html",overwrite=TRUE)
+
+```
+
+B4 (DE7 and DE8): Effect of Sed vs Ex in ctrl and ACSS2 gene KD
+
+```{r,bi4}
+
+b4 <- merge(de7,de7,by=0)
+rownames(b4) <- b4$Row.names
+b4$Row.names=NULL
+colnames(b4) <- c("ctrl","Acss2KD")
+resb4 <- mitch_calc(b4, genesets, priority="effect")
+head(resb4$enrichment_result,20) %>% kbl(caption="effect of  Sed vs Ex in ctrl and Acss2 gene KD") %>% kable_styling()
+mitch_report(res=resb4,outfile="mitch_b4.html",overwrite=TRUE)
+
+```
+
+## Multi-dimensional
+
+```{r,multi1}
+
+colnames(de1rn) <- c("gene","de1")
+colnames(de2rn) <- c("gene","de2")
+colnames(de3rn) <- c("gene","de3")
+colnames(de4rn) <- c("gene","de4")
+colnames(de5rn) <- c("gene","de5")
+colnames(de6rn) <- c("gene","de6")
+colnames(de7rn) <- c("gene","de7")
+colnames(de8rn) <- c("gene","de8")
+
+ll <- list("de1"=de1rn,"de2"=de2rn,"de3"=de3rn,"de4"=de4rn,"de5"=de5rn,"de6"=de6rn,"de7"=de7rn,"de8"=de8rn)
+jj <- join_all(ll)
+head(jj)
+rownames(jj) <- jj$gene
+jj$gene=NULL
+dim(jj)
+
+resm <- mitch_calc(jj, genesets, priority="effect")
+mitch_report(res=resm,outfile="mitch_m.html",overwrite=TRUE)
+
+```
+
+## Session information
+
+```{r,session}
+
+sessionInfo()
+
+```
+
+
+
+
+
+
