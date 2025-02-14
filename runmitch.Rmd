@@ -149,35 +149,35 @@ Enrich it.
 
 ```{r,enrich1}
 
-res1 <- mitch_calc(de1, genesets, priority="effect")
+res1 <- mitch_calc(de1, genesets, priority="effect",cores=8)
 head(res1$enrichment_result,20) %>% kbl(caption="DE1: Reactome") %>% kable_styling()
 mitch_report(res=res1,outfile="mitch_de1.html",overwrite=TRUE)
 
-res2 <- mitch_calc(de2, genesets, priority="effect")
+res2 <- mitch_calc(de2, genesets, priority="effect",cores=8)
 head(res2$enrichment_result,20) %>% kbl(caption="DE2: Reactome") %>% kable_styling()
 mitch_report(res=res2,outfile="mitch_de2.html",overwrite=TRUE)
 
-res3 <- mitch_calc(de3, genesets, priority="effect")
+res3 <- mitch_calc(de3, genesets, priority="effect",cores=8)
 head(res3$enrichment_result,20) %>% kbl(caption="DE3: Reactome") %>% kable_styling()
-#mitch_report(res=res3,outfile="mitch_de3.html",overwrite=TRUE)
+mitch_report(res=res3,outfile="mitch_de3.html",overwrite=TRUE)
 
-res4 <- mitch_calc(de4, genesets, priority="effect")
+res4 <- mitch_calc(de4, genesets, priority="effect",cores=8)
 head(res4$enrichment_result,20) %>% kbl(caption="DE4: Reactome") %>% kable_styling()
 mitch_report(res=res4,outfile="mitch_de4.html",overwrite=TRUE)
 
-res5 <- mitch_calc(de5, genesets, priority="effect")
+res5 <- mitch_calc(de5, genesets, priority="effect",cores=8)
 head(res5$enrichment_result,20) %>% kbl(caption="DE5: Reactome") %>% kable_styling()
 mitch_report(res=res5,outfile="mitch_de5.html",overwrite=TRUE)
 
-res6 <- mitch_calc(de6, genesets, priority="effect")
+res6 <- mitch_calc(de6, genesets, priority="effect",cores=8)
 head(res6$enrichment_result,20) %>% kbl(caption="DE6: Reactome") %>% kable_styling()
 mitch_report(res=res6,outfile="mitch_de6.html",overwrite=TRUE)
 
-res7 <- mitch_calc(de7, genesets, priority="effect")
+res7 <- mitch_calc(de7, genesets, priority="effect",cores=8)
 head(res7$enrichment_result,20) %>% kbl(caption="DE7: Reactome") %>% kable_styling()
 mitch_report(res=res7,outfile="mitch_de7.html",overwrite=TRUE)
 
-res8 <- mitch_calc(de8, genesets, priority="effect")
+res8 <- mitch_calc(de8, genesets, priority="effect",cores=8)
 head(res8$enrichment_result,20) %>% kbl(caption="DE8: Reactome") %>% kable_styling()
 mitch_report(res=res8,outfile="mitch_de8.html",overwrite=TRUE)
 
@@ -193,7 +193,7 @@ b1 <- merge(de1,de2,by=0)
 rownames(b1) <- b1$Row.names
 b1$Row.names=NULL
 colnames(b1) <- c("Sed","Ex")
-resb1 <- mitch_calc(b1, genesets, priority="effect")
+resb1 <- mitch_calc(b1, genesets, priority="effect",cores=8)
 head(resb1$enrichment_result,20) %>% kbl(caption="effect of ATP-CL KD in Sed and Ex animals") %>% kable_styling()
 mitch_report(res=resb1,outfile="mitch_b1.html",overwrite=TRUE)
 
@@ -207,7 +207,7 @@ b2 <- merge(de3,de4,by=0)
 rownames(b2) <- b2$Row.names
 b2$Row.names=NULL
 colnames(b2) <- c("Sed","Ex")
-resb2 <- mitch_calc(b2, genesets, priority="effect")
+resb2 <- mitch_calc(b2, genesets, priority="effect",cores=8)
 head(resb2$enrichment_result,20) %>% kbl(caption="effect of ACSS2 KD in Sed and Ex animals") %>% kable_styling()
 mitch_report(res=resb2,outfile="mitch_b2.html",overwrite=TRUE)
 
@@ -221,7 +221,7 @@ b3 <- merge(de5,de6,by=0)
 rownames(b3) <- b3$Row.names
 b3$Row.names=NULL
 colnames(b3) <- c("ctrl","AcyKD")
-resb3 <- mitch_calc(b3, genesets, priority="effect")
+resb3 <- mitch_calc(b3, genesets, priority="effect",cores=8)
 head(resb3$enrichment_result,20) %>% kbl(caption="effect of  Sed vs Ex in ctrl and ATP-CL gene KD") %>% kable_styling()
 mitch_report(res=resb3,outfile="mitch_b3.html",overwrite=TRUE)
 
@@ -235,7 +235,7 @@ b4 <- merge(de7,de8,by=0)
 rownames(b4) <- b4$Row.names
 b4$Row.names=NULL
 colnames(b4) <- c("ctrl","Acss2KD")
-resb4 <- mitch_calc(b4, genesets, priority="effect")
+resb4 <- mitch_calc(b4, genesets, priority="effect",cores=8)
 head(resb4$enrichment_result,20) %>% kbl(caption="effect of  Sed vs Ex in ctrl and Acss2 gene KD") %>% kable_styling()
 mitch_report(res=resb4,outfile="mitch_b4.html",overwrite=TRUE)
 
@@ -261,7 +261,7 @@ rownames(jj) <- jj$gene
 jj$gene=NULL
 dim(jj)
 
-resm <- mitch_calc(jj, genesets, priority="effect")
+resm <- mitch_calc(jj, genesets, priority="effect",cores=8)
 head(resm$enrichment_result,20) %>% kbl(caption="Multimitch") %>% kable_styling()
 mitch_report(res=resm,outfile="mitch_m.html",overwrite=TRUE)
 
@@ -274,9 +274,3 @@ mitch_report(res=resm,outfile="mitch_m.html",overwrite=TRUE)
 sessionInfo()
 
 ```
-
-
-
-
-
-
